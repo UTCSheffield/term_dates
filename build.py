@@ -1198,8 +1198,18 @@ def build_index_html(output_dir: Path, readme_path: Path) -> None:
             for rel_path, filename, size in files:
                 size_kb = size / 1024
                 size_str = f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb/1024:.1f} MB"
+                
+                # Use webcal:// for ICS files, otherwise use regular https:// link
+                if filename.endswith('.ics'):
+                    # Convert to webcal:// URL for calendar subscription
+                    link_url = f"webcal://utcsheffield.github.io/term_dates/{rel_path}"
+                    link_text = f"{rel_path} (Subscribe)"
+                else:
+                    link_url = rel_path
+                    link_text = rel_path
+                
                 html += f"""            <li>
-                <a href="{rel_path}">{rel_path}</a>
+                <a href="{link_url}">{link_text}</a>
                 <span class="file-size">{size_str}</span>
             </li>
 """

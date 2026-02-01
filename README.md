@@ -24,6 +24,7 @@ leas:
 		scan_pdfs: true
 schools:
 	- name: The Sheffield UTC Academy Trust
+		shortname: SUTC
 		lea: Sheffield
 		dir: sutc
 		pd_days:
