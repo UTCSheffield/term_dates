@@ -818,6 +818,7 @@ def write_ics(
     pd_days: list[PDDay],
     label: str,
     include_pd: bool,
+    shortname: str | None = None,
 ) -> None:
     now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     lines = [
@@ -829,6 +830,10 @@ def write_ics(
     ]
 
     pd_set = {pd.date for pd in pd_days}
+    
+    # Use shortname if provided for summary, otherwise use full name
+    display_name = shortname if shortname else school_name
+    
     for year in years:
         week_map = week_numbers(year.term_dates)
         holiday_set = set(year.holiday_dates)
@@ -840,13 +845,28 @@ def write_ics(
                 for d in year.term_dates
                 if d not in pd_set and d not in holiday_set
             ]
+        
+        # Create day counter for school days (only for label == "School day")
+        day_counter = {day: idx + 1 for idx, day in enumerate(dates)} if label == "School day" else {}
+        
         for day in dates:
             week = week_map[day]
-            summary = f"{label} (Week {week})"
+            
+            # Format summary based on whether we're counting days
+            if label == "School day" and day in day_counter:
+                day_num = day_counter[day]
+                event_label = f"Day {day_num} (Week {week})"
+            else:
+                event_label = f"{label} (Week {week})"
+            
             if year.provisional:
-                summary = f"PROVISIONAL {summary}"
-            if school_name:
-                summary = f"{school_name}: {summary}"
+                event_label = f"PROVISIONAL {event_label}"
+            
+            if display_name:
+                summary = f"{display_name}: {event_label}"
+            else:
+                summary = event_label
+            
             status = "TENTATIVE" if year.provisional else "CONFIRMED"
             lines.extend(
                 [
@@ -1314,6 +1334,7 @@ def main() -> None:
                 [],
                 label="Term day",
                 include_pd=False,
+                shortname=None,
             )
             write_school_holidays_ics(
                 lea_dir / "school_holidays.ics",
@@ -1369,6 +1390,8 @@ def main() -> None:
                 (school_dir / "school_dates.json").write_text(
                     json.dumps(school_json, indent=2) + "\n", encoding="utf-8"
                 )
+                # Get shortname from config if available
+                school_shortname = str(school.get("shortname", "")).strip() or None
                 write_ics(
                     school_dir / "school_dates.ics",
                     valid_years,
@@ -1376,6 +1399,7 @@ def main() -> None:
                     pd_days,
                     label="School day",
                     include_pd=False,
+                    shortname=school_shortname,
                 )
                 write_school_holidays_ics(
                     school_dir / "school_holidays.ics",
@@ -1456,6 +1480,7 @@ def main() -> None:
         [],
         label="Term day",
         include_pd=True,
+        shortname=None,
     )
     write_ics(
         output_dir / "school_dates.ics",
@@ -1464,6 +1489,7 @@ def main() -> None:
         pd_days,
         label="School day",
         include_pd=False,
+        shortname=None,
     )
     write_school_holidays_ics(
         output_dir / "school_holidays.ics",
