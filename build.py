@@ -1001,8 +1001,30 @@ def json_data_changed(new_data: dict[str, object], existing_data: dict[str, obje
     return new_copy != existing_copy
 
 
-def build_index_html(output_dir: Path, readme_path: Path) -> None:
+def build_index_html(output_dir: Path, readme_path: Path, config: dict[str, object] | None = None) -> None:
     """Build an index.html file with README content and links to generated files."""
+    # Build mapping of directory names to full school/LEA names
+    name_mapping = {}
+    if config:
+        # Add schools
+        schools_config = config.get("schools", [])
+        if isinstance(schools_config, list):
+            for school in schools_config:
+                if isinstance(school, dict):
+                    name = school.get("name", "")
+                    dir_name = school.get("dir", "")
+                    if name and dir_name:
+                        name_mapping[str(dir_name)] = str(name)
+        
+        # Add LEAs
+        leas_config = config.get("leas", [])
+        if isinstance(leas_config, list):
+            for lea in leas_config:
+                if isinstance(lea, dict):
+                    name = lea.get("name", "")
+                    if name:
+                        name_mapping[slugify(str(name))] = str(name)
+    
     readme_html = ""
     if readme_path.exists():
         readme_content = readme_path.read_text(encoding="utf-8")
@@ -1014,38 +1036,43 @@ def build_index_html(output_dir: Path, readme_path: Path) -> None:
             # Fallback: wrap in pre tag
             readme_html = f"<pre>{readme_content}</pre>"
     
-    # Collect all generated files
-    files_by_category = {
-        "LEA Outputs": [],
-        "School Outputs": [],
-        "Root Outputs": []
-    }
+    # Collect all generated files grouped by school/LEA name
+    files_by_school = {}
     
     # Scan LEAs directory
     leas_dir = output_dir / "leas"
     if leas_dir.exists():
         for lea_dir in sorted(leas_dir.iterdir()):
             if lea_dir.is_dir():
+                # Use mapping to get full name, fallback to formatted dir name
+                lea_name = name_mapping.get(lea_dir.name, lea_dir.name.replace("-", " ").title())
+                if lea_name not in files_by_school:
+                    files_by_school[lea_name] = []
                 for file in sorted(lea_dir.iterdir()):
                     if file.is_file():
                         rel_path = file.relative_to(output_dir)
-                        files_by_category["LEA Outputs"].append((str(rel_path), file.name, file.stat().st_size))
+                        files_by_school[lea_name].append((str(rel_path), file.name, file.stat().st_size))
     
     # Scan schools directory
     schools_dir = output_dir / "schools"
     if schools_dir.exists():
         for school_dir in sorted(schools_dir.iterdir()):
             if school_dir.is_dir():
+                # Use mapping to get full name, fallback to formatted dir name
+                school_name = name_mapping.get(school_dir.name, school_dir.name.replace("-", " ").title())
+                if school_name not in files_by_school:
+                    files_by_school[school_name] = []
                 for file in sorted(school_dir.iterdir()):
                     if file.is_file():
                         rel_path = file.relative_to(output_dir)
-                        files_by_category["School Outputs"].append((str(rel_path), file.name, file.stat().st_size))
+                        files_by_school[school_name].append((str(rel_path), file.name, file.stat().st_size))
     
-    # Scan root output directory
+    # Root outputs (without school grouping)
+    root_files = []
     for file in sorted(output_dir.iterdir()):
         if file.is_file() and file.name != "index.html":
             rel_path = file.relative_to(output_dir)
-            files_by_category["Root Outputs"].append((str(rel_path), file.name, file.stat().st_size))
+            root_files.append((str(rel_path), file.name, file.stat().st_size))
     
     # Generate HTML
     html = f"""<!DOCTYPE html>
@@ -1187,12 +1214,13 @@ def build_index_html(output_dir: Path, readme_path: Path) -> None:
     <h2>Generated Files</h2>
 """
     
-    # Add file listings by category
-    for category, files in files_by_category.items():
+    # Add file listings by school
+    for school_name in sorted(files_by_school.keys()):
+        files = files_by_school[school_name]
         if files:
             html += f"""
     <div class="category">
-        <h3>{category}</h3>
+        <h3>{school_name}</h3>
         <ul class="file-list">
 """
             for rel_path, filename, size in files:
@@ -1214,6 +1242,35 @@ def build_index_html(output_dir: Path, readme_path: Path) -> None:
             </li>
 """
             html += """        </ul>
+    </div>
+"""
+    
+    # Add root outputs section if there are any
+    if root_files:
+        html += f"""
+    <div class="category">
+        <h3>General</h3>
+        <ul class="file-list">
+"""
+        for rel_path, filename, size in root_files:
+            size_kb = size / 1024
+            size_str = f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb/1024:.1f} MB"
+            
+            # Use webcal:// for ICS files, otherwise use regular https:// link
+            if filename.endswith('.ics'):
+                # Convert to webcal:// URL for calendar subscription
+                link_url = f"webcal://utcsheffield.github.io/term_dates/{rel_path}"
+                link_text = f"{rel_path} (Subscribe)"
+            else:
+                link_url = rel_path
+                link_text = rel_path
+            
+            html += f"""            <li>
+                <a href="{link_url}">{link_text}</a>
+                <span class="file-size">{size_str}</span>
+            </li>
+"""
+        html += """        </ul>
     </div>
 """
     
@@ -1471,7 +1528,7 @@ def main() -> None:
 
         # Build index.html
         readme_path = Path(__file__).parent / "README.md"
-        build_index_html(output_dir, readme_path)
+        build_index_html(output_dir, readme_path, config)
 
         print(f"Wrote outputs to {output_dir}")
         return
@@ -1561,7 +1618,7 @@ def main() -> None:
 
     # Build index.html
     readme_path = Path(__file__).parent / "README.md"
-    build_index_html(output_dir, readme_path)
+    build_index_html(output_dir, readme_path, config)
 
     if pd_days and len(pd_days) != 5:
         print(f"Warning: expected 5 PD days, got {len(pd_days)}")
