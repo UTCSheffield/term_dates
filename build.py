@@ -619,8 +619,12 @@ def merge_academic_years(
     existing_data: dict[str, object] | None,
     new_years: list[AcademicYear],
     year_formatter: callable,
+    pd_days: list[PDDay] | None = None,
 ) -> list[dict[str, object]]:
-    """Merge existing academic years with new ones, preserving confirmed years."""
+    """Merge existing academic years with new ones, preserving confirmed years.
+    
+    Regenerates confirmed years if PD days have changed.
+    """
     if not existing_data:
         return [year_formatter(year) for year in new_years]
     
@@ -634,21 +638,52 @@ def merge_academic_years(
         if isinstance(year_data, dict) and "name" in year_data:
             existing_map[str(year_data["name"])] = year_data
     
+    # Calculate PD days signature for comparison
+    pd_set = {pd.date for pd in (pd_days or [])}
+    
+    def get_year_pd_dates(year_name: str) -> set[str]:
+        """Get PD dates that fall within this academic year."""
+        try:
+            start_year = int(year_name.split("-")[0])
+            academic_start = date(start_year, 8, 1)
+            academic_end = date(start_year + 1, 7, 31)
+            year_pds = {
+                pd.date.isoformat() for pd in (pd_days or [])
+                if academic_start <= pd.date <= academic_end
+            }
+            return year_pds
+        except (ValueError, IndexError):
+            return set()
+    
     # Build result list
     result_years: dict[str, dict[str, object]] = {}
     
-    # Add all existing confirmed years (never modify them)
+    # Add all existing confirmed years (preserve if PD dates unchanged)
     for name, year_data in existing_map.items():
         if not year_data.get("provisional", False):
-            result_years[name] = year_data
+            # Check if PD dates have changed
+            existing_pd_dates = set(year_data.get("pd_days", []))
+            if isinstance(existing_pd_dates, list):
+                existing_pd_dates = {d.get("date") if isinstance(d, dict) else d for d in existing_pd_dates}
+            new_pd_dates = get_year_pd_dates(name)
+            
+            if existing_pd_dates == new_pd_dates:
+                # PD dates unchanged, keep existing
+                result_years[name] = year_data
+            else:
+                # PD dates changed, mark for regeneration (don't add yet)
+                pass
     
     # Add or update years from new data
     for year in new_years:
         existing = existing_map.get(year.name)
         
         if year.name in result_years:
-            # Already have a confirmed version, skip
+            # Already have a confirmed version with same PD dates, skip
             continue
+        elif existing and not existing.get("provisional", False):
+            # Was confirmed but PD dates changed, regenerate it
+            result_years[year.name] = year_formatter(year)
         elif existing and existing.get("provisional", False) and not year.provisional:
             # Update provisional to confirmed
             result_years[year.name] = year_formatter(year)
@@ -687,7 +722,7 @@ def build_term_json(
             ],
         }
     
-    merged_years = merge_academic_years(existing_data, years, format_year)
+    merged_years = merge_academic_years(existing_data, years, format_year, pd_days)
     
     payload: dict[str, object] = {
         "generated_at": now,
@@ -747,7 +782,7 @@ def build_school_json(
             ],
         }
     
-    merged_years = merge_academic_years(existing_data, years, format_year)
+    merged_years = merge_academic_years(existing_data, years, format_year, pd_days)
     
     # Calculate all_schooldays from merged years
     all_schooldays: list[str] = []
@@ -761,7 +796,7 @@ def build_school_json(
     
     payload: dict[str, object] = {
         "generated_at": now,
-        "source": SOURCE_URL,
+        "source": "https://www.sheffield.gov.uk/schools-childcare/school-information-term-dates",
         "school": school_name,
         "pd_days": [
             {"date": pd.date.isoformat(), "label": pd.label} for pd in pd_days
