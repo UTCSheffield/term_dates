@@ -989,6 +989,18 @@ def write_school_holidays_ics(
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def json_data_changed(new_data: dict[str, object], existing_data: dict[str, object] | None) -> bool:
+    """Check if JSON data has changed, ignoring generated_at timestamp."""
+    if existing_data is None:
+        return True
+    
+    # Create copies without generated_at for comparison
+    new_copy = {k: v for k, v in new_data.items() if k != "generated_at"}
+    existing_copy = {k: v for k, v in existing_data.items() if k != "generated_at"}
+    
+    return new_copy != existing_copy
+
+
 def build_index_html(output_dir: Path, readme_path: Path) -> None:
     """Build an index.html file with README content and links to generated files."""
     readme_html = ""
@@ -1198,9 +1210,6 @@ def build_index_html(output_dir: Path, readme_path: Path) -> None:
     # Add timestamp
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     html += f"""
-    <div class="timestamp">
-        Generated: {now}
-    </div>
 </body>
 </html>
 """
@@ -1351,26 +1360,29 @@ def main() -> None:
                     pass  # If we can't parse it, start fresh
             
             lea_json = build_school_json(valid_years, lea_name, [], existing_lea_data)
-            (lea_dir / "term_dates.json").write_text(
-                json.dumps(lea_json, indent=2) + "\n", encoding="utf-8"
-            )
-            write_ics(
-                lea_dir / "term_dates.ics",
-                valid_years,
-                lea_name,
-                [],
-                label="Term day",
-                include_pd=False,
-                shortname=None,
-            )
-            write_school_holidays_ics(
-                lea_dir / "school_holidays.ics",
-                valid_years,
-                lea_name,
-                [],
-                bank_holidays=bank_holidays,
-                shortname=None,
-            )
+            
+            # Only write ICS files if JSON has changed
+            if json_data_changed(lea_json, existing_lea_data):
+                (lea_dir / "term_dates.json").write_text(
+                    json.dumps(lea_json, indent=2) + "\n", encoding="utf-8"
+                )
+                write_ics(
+                    lea_dir / "term_dates.ics",
+                    valid_years,
+                    lea_name,
+                    [],
+                    label="Term day",
+                    include_pd=False,
+                    shortname=None,
+                )
+                write_school_holidays_ics(
+                    lea_dir / "school_holidays.ics",
+                    valid_years,
+                    lea_name,
+                    [],
+                    bank_holidays=bank_holidays,
+                    shortname=None,
+                )
 
         schools_config = config.get("schools", [])
         if isinstance(schools_config, list) and schools_config:
@@ -1416,29 +1428,31 @@ def main() -> None:
                         pass  # If we can't parse it, start fresh
                 
                 school_json = build_school_json(valid_years, name, pd_days, existing_school_data)
-                (school_dir / "school_dates.json").write_text(
-                    json.dumps(school_json, indent=2) + "\n", encoding="utf-8"
-                )
-                # Get shortname from config if available
-                school_shortname = str(school.get("shortname", "")).strip() or None
-                write_ics(
-                    school_dir / "school_dates.ics",
-                    valid_years,
-                    name,
-                    pd_days,
-                    label="School day",
-                    include_pd=False,
-                    shortname=school_shortname,
-                )
-                school_shortname = str(school.get("shortname", "")).strip() or None
-                write_school_holidays_ics(
-                    school_dir / "school_holidays.ics",
-                    valid_years,
-                    name,
-                    pd_days,
-                    bank_holidays=bank_holidays,
-                    shortname=school_shortname,
-                )
+                
+                # Only write ICS files if JSON has changed
+                if json_data_changed(school_json, existing_school_data):
+                    (school_dir / "school_dates.json").write_text(
+                        json.dumps(school_json, indent=2) + "\n", encoding="utf-8"
+                    )
+                    # Get shortname from config if available
+                    school_shortname = str(school.get("shortname", "")).strip() or None
+                    write_ics(
+                        school_dir / "school_dates.ics",
+                        valid_years,
+                        name,
+                        pd_days,
+                        label="School day",
+                        include_pd=False,
+                        shortname=school_shortname,
+                    )
+                    write_school_holidays_ics(
+                        school_dir / "school_holidays.ics",
+                        valid_years,
+                        name,
+                        pd_days,
+                        bank_holidays=bank_holidays,
+                        shortname=school_shortname,
+                    )
 
             if invalid_by_school:
                 print("Warning: date totals invalid for schools:")
@@ -1498,39 +1512,42 @@ def main() -> None:
     term_json = build_term_json(valid_years, general_name, [], existing_term_data)
     school_json = build_school_json(valid_years, school_name, pd_days, existing_school_data)
 
-    (output_dir / "term_dates.json").write_text(
-        json.dumps(term_json, indent=2) + "\n", encoding="utf-8"
-    )
-    (output_dir / "school_dates.json").write_text(
-        json.dumps(school_json, indent=2) + "\n", encoding="utf-8"
-    )
-
-    write_ics(
-        output_dir / "term_dates.ics",
-        valid_years,
-        general_name,
-        [],
-        label="Term day",
-        include_pd=True,
-        shortname=None,
-    )
-    write_ics(
-        output_dir / "school_dates.ics",
-        valid_years,
-        school_name,
-        pd_days,
-        label="School day",
-        include_pd=False,
-        shortname=None,
-    )
-    write_school_holidays_ics(
-        output_dir / "school_holidays.ics",
-        valid_years,
-        school_name,
-        pd_days,
-        bank_holidays=bank_holidays,
-        shortname=None,
-    )
+    # Only write ICS files if JSON has changed
+    if json_data_changed(term_json, existing_term_data):
+        (output_dir / "term_dates.json").write_text(
+            json.dumps(term_json, indent=2) + "\n", encoding="utf-8"
+        )
+        write_ics(
+            output_dir / "term_dates.ics",
+            valid_years,
+            general_name,
+            [],
+            label="Term day",
+            include_pd=True,
+            shortname=None,
+        )
+    
+    if json_data_changed(school_json, existing_school_data):
+        (output_dir / "school_dates.json").write_text(
+            json.dumps(school_json, indent=2) + "\n", encoding="utf-8"
+        )
+        write_ics(
+            output_dir / "school_dates.ics",
+            valid_years,
+            school_name,
+            pd_days,
+            label="School day",
+            include_pd=False,
+            shortname=None,
+        )
+        write_school_holidays_ics(
+            output_dir / "school_holidays.ics",
+            valid_years,
+            school_name,
+            pd_days,
+            bank_holidays=bank_holidays,
+            shortname=None,
+        )
 
     # Build index.html
     readme_path = Path(__file__).parent / "README.md"
