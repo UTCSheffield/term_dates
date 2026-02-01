@@ -891,8 +891,10 @@ def write_school_holidays_ics(
     years: list[AcademicYear],
     school_name: str,
     pd_days: list[PDDay],
+    bank_holidays: set[date] | None = None,
+    shortname: str | None = None,
 ) -> None:
-    """Write iCalendar file with school holiday periods and PD days."""
+    """Write iCalendar file with school holiday periods, bank holidays, and PD days."""
     now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     lines = [
         "BEGIN:VCALENDAR",
@@ -901,6 +903,9 @@ def write_school_holidays_ics(
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
     ]
+
+    bank_holidays_set = bank_holidays or set()
+    display_name = shortname if shortname else school_name
 
     for year in years:
         # Calculate school holiday periods
@@ -920,8 +925,8 @@ def write_school_holidays_ics(
             summary = label
             if year.provisional:
                 summary = f"PROVISIONAL {summary}"
-            if school_name:
-                summary = f"{school_name}: {summary}"
+            if display_name:
+                summary = f"{display_name}: {summary}"
             
             lines.extend(
                 [
@@ -936,14 +941,36 @@ def write_school_holidays_ics(
                 ]
             )
         
+        # Add bank holidays as single-day events
+        for bank_holiday in sorted(bank_holidays_set):
+            if academic_start <= bank_holiday <= academic_end:
+                summary = "Bank holiday"
+                if year.provisional:
+                    summary = f"PROVISIONAL {summary}"
+                if display_name:
+                    summary = f"{display_name}: {summary}"
+                
+                lines.extend(
+                    [
+                        "BEGIN:VEVENT",
+                        f"UID:bank-{bank_holiday:%Y%m%d}-{year.name}@datepatterns",
+                        f"DTSTAMP:{now}",
+                        f"DTSTART;VALUE=DATE:{format_ics_date(bank_holiday)}",
+                        f"DTEND;VALUE=DATE:{format_ics_date(bank_holiday + timedelta(days=1))}",
+                        f"SUMMARY:{summary}",
+                        f"STATUS:{status}",
+                        "END:VEVENT",
+                    ]
+                )
+        
         # Add PD days that fall within this academic year
         for pd in pd_days:
             if academic_start <= pd.date <= academic_end:
                 summary = pd.label
                 if year.provisional:
                     summary = f"PROVISIONAL {summary}"
-                if school_name:
-                    summary = f"{school_name}: {summary}"
+                if display_name:
+                    summary = f"{display_name}: {summary}"
                 
                 lines.extend(
                     [
@@ -1341,6 +1368,8 @@ def main() -> None:
                 valid_years,
                 lea_name,
                 [],
+                bank_holidays=bank_holidays,
+                shortname=None,
             )
 
         schools_config = config.get("schools", [])
@@ -1401,11 +1430,14 @@ def main() -> None:
                     include_pd=False,
                     shortname=school_shortname,
                 )
+                school_shortname = str(school.get("shortname", "")).strip() or None
                 write_school_holidays_ics(
                     school_dir / "school_holidays.ics",
                     valid_years,
                     name,
                     pd_days,
+                    bank_holidays=bank_holidays,
+                    shortname=school_shortname,
                 )
 
             if invalid_by_school:
@@ -1496,6 +1528,8 @@ def main() -> None:
         valid_years,
         school_name,
         pd_days,
+        bank_holidays=bank_holidays,
+        shortname=None,
     )
 
     # Build index.html
