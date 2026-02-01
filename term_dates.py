@@ -27,6 +27,12 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     yaml = None
 
+try:
+    import markdown
+    HAS_MARKDOWN = True
+except ImportError:
+    HAS_MARKDOWN = False
+
 
 def is_term_line(line: str) -> bool:
     line = line.strip()
@@ -452,6 +458,61 @@ def parse_academic_years(text: str) -> list[AcademicYear]:
     return years
 
 
+def calculate_school_holidays(term_ranges: list[tuple[date, date]], academic_start: date, academic_end: date) -> list[tuple[date, date, str]]:
+    """Calculate school holiday periods between terms."""
+    holidays: list[tuple[date, date, str]] = []
+    
+    if not term_ranges:
+        return holidays
+    
+    sorted_terms = sorted(term_ranges, key=lambda r: r[0])
+    
+    # Holiday before first term
+    first_term_start = sorted_terms[0][0]
+    if academic_start < first_term_start:
+        holidays.append((academic_start, first_term_start - timedelta(days=1), "Summer holiday"))
+    
+    # Holidays between terms
+    for i in range(len(sorted_terms) - 1):
+        current_end = sorted_terms[i][1]
+        next_start = sorted_terms[i + 1][0]
+        gap_days = (next_start - current_end).days - 1
+        
+        if gap_days > 0:
+            holiday_start = current_end + timedelta(days=1)
+            holiday_end = next_start - timedelta(days=1)
+            
+            # Determine holiday name based on timing
+            month = holiday_start.month
+            if month >= 10 and gap_days <= 7:
+                label = "October half-term"
+            elif month >= 12 or month <= 1:
+                if gap_days > 7:
+                    label = "Christmas holiday"
+                else:
+                    label = "Christmas break"
+            elif month == 2:
+                label = "February half-term"
+            elif month >= 3 and month <= 4:
+                if gap_days > 7:
+                    label = "Easter holiday"
+                else:
+                    label = "Spring break"
+            elif month == 5 or month == 6:
+                label = "May half-term"
+            else:
+                label = "School holiday"
+            
+            holidays.append((holiday_start, holiday_end, label))
+    
+    # Holiday after last term
+    last_term_end = sorted_terms[-1][1]
+    if last_term_end < academic_end:
+        holidays.append((last_term_end + timedelta(days=1), academic_end, "Summer holiday"))
+    
+    return holidays
+
+
 def week_numbers(dates: Iterable[date]) -> dict[date, int]:
     week_map: dict[date, int] = {}
     date_week: dict[date, int] = {}
@@ -609,26 +670,51 @@ def build_school_json(
             {"date": pd.date.isoformat(), "label": pd.label} for pd in pd_days
         ],
         "academic_years": [],
+        "all_schooldays": [],
     }
 
     pd_set = {pd.date for pd in pd_days}
+    all_schooldays: list[date] = []
     for year in years:
         week_map = week_numbers(year.term_dates)
-        holiday_set = set(year.holiday_dates)
+        bank_holidays_set = set(year.holiday_dates)
         school_dates = [
-            d for d in year.term_dates if d not in pd_set and d not in holiday_set
+            d for d in year.term_dates if d not in pd_set and d not in bank_holidays_set
         ]
+        all_schooldays.extend(school_dates)
+        
+        # Calculate school holiday periods
+        try:
+            start_year = int(year.name.split("-")[0])
+            academic_start = date(start_year, 8, 1)
+            academic_end = date(start_year + 1, 7, 31)
+        except ValueError:
+            academic_start = date(2025, 8, 1)
+            academic_end = date(2026, 7, 31)
+        
+        school_holiday_periods = calculate_school_holidays(year.term_ranges, academic_start, academic_end)
+        
         payload["academic_years"].append(
             {
                 "name": year.name,
                 "provisional": year.provisional,
-                "holidays": [d.isoformat() for d in year.holiday_dates],
+                "bank_holidays": [d.isoformat() for d in sorted(bank_holidays_set)],
+                "school_holidays": [
+                    {
+                        "start": start.isoformat(),
+                        "end": end.isoformat(),
+                        "label": label
+                    }
+                    for start, end, label in school_holiday_periods
+                ],
                 "dates": [
                     {"date": d.isoformat(), "week": week_map[d]}
                     for d in school_dates
                 ],
             }
         )
+    
+    payload["all_schooldays"] = sorted([d.isoformat() for d in all_schooldays])
     return payload
 
 
@@ -689,6 +775,303 @@ def write_ics(
 
     lines.append("END:VCALENDAR")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_school_holidays_ics(
+    path: Path,
+    years: list[AcademicYear],
+    school_name: str,
+    pd_days: list[PDDay],
+) -> None:
+    """Write iCalendar file with school holiday periods and PD days."""
+    now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//datepatterns//school holidays//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+    ]
+
+    for year in years:
+        # Calculate school holiday periods
+        try:
+            start_year = int(year.name.split("-")[0])
+            academic_start = date(start_year, 8, 1)
+            academic_end = date(start_year + 1, 7, 31)
+        except ValueError:
+            academic_start = date(2025, 8, 1)
+            academic_end = date(2026, 7, 31)
+        
+        school_holiday_periods = calculate_school_holidays(year.term_ranges, academic_start, academic_end)
+        status = "TENTATIVE" if year.provisional else "CONFIRMED"
+        
+        # Add school holiday periods as multi-day events
+        for start, end, label in school_holiday_periods:
+            summary = label
+            if year.provisional:
+                summary = f"PROVISIONAL {summary}"
+            if school_name:
+                summary = f"{school_name}: {summary}"
+            
+            lines.extend(
+                [
+                    "BEGIN:VEVENT",
+                    f"UID:holiday-{start:%Y%m%d}-{end:%Y%m%d}-{year.name}@datepatterns",
+                    f"DTSTAMP:{now}",
+                    f"DTSTART;VALUE=DATE:{format_ics_date(start)}",
+                    f"DTEND;VALUE=DATE:{format_ics_date(end + timedelta(days=1))}",
+                    f"SUMMARY:{summary}",
+                    f"STATUS:{status}",
+                    "END:VEVENT",
+                ]
+            )
+        
+        # Add PD days that fall within this academic year
+        for pd in pd_days:
+            if academic_start <= pd.date <= academic_end:
+                summary = pd.label
+                if year.provisional:
+                    summary = f"PROVISIONAL {summary}"
+                if school_name:
+                    summary = f"{school_name}: {summary}"
+                
+                lines.extend(
+                    [
+                        "BEGIN:VEVENT",
+                        f"UID:pd-{pd.date:%Y%m%d}-{year.name}@datepatterns",
+                        f"DTSTAMP:{now}",
+                        f"DTSTART;VALUE=DATE:{format_ics_date(pd.date)}",
+                        f"DTEND;VALUE=DATE:{format_ics_date(pd.date + timedelta(days=1))}",
+                        f"SUMMARY:{summary}",
+                        f"STATUS:{status}",
+                        "END:VEVENT",
+                    ]
+                )
+
+    lines.append("END:VCALENDAR")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def build_index_html(output_dir: Path, readme_path: Path) -> None:
+    """Build an index.html file with README content and links to generated files."""
+    readme_html = ""
+    if readme_path.exists():
+        readme_content = readme_path.read_text(encoding="utf-8")
+        if HAS_MARKDOWN:
+            # Convert markdown to HTML
+            md = markdown.Markdown(extensions=['fenced_code', 'tables', 'nl2br'])
+            readme_html = md.convert(readme_content)
+        else:
+            # Fallback: wrap in pre tag
+            readme_html = f"<pre>{readme_content}</pre>"
+    
+    # Collect all generated files
+    files_by_category = {
+        "LEA Outputs": [],
+        "School Outputs": [],
+        "Root Outputs": []
+    }
+    
+    # Scan LEAs directory
+    leas_dir = output_dir / "leas"
+    if leas_dir.exists():
+        for lea_dir in sorted(leas_dir.iterdir()):
+            if lea_dir.is_dir():
+                for file in sorted(lea_dir.iterdir()):
+                    if file.is_file():
+                        rel_path = file.relative_to(output_dir)
+                        files_by_category["LEA Outputs"].append((str(rel_path), file.name, file.stat().st_size))
+    
+    # Scan schools directory
+    schools_dir = output_dir / "schools"
+    if schools_dir.exists():
+        for school_dir in sorted(schools_dir.iterdir()):
+            if school_dir.is_dir():
+                for file in sorted(school_dir.iterdir()):
+                    if file.is_file():
+                        rel_path = file.relative_to(output_dir)
+                        files_by_category["School Outputs"].append((str(rel_path), file.name, file.stat().st_size))
+    
+    # Scan root output directory
+    for file in sorted(output_dir.iterdir()):
+        if file.is_file() and file.name != "index.html":
+            rel_path = file.relative_to(output_dir)
+            files_by_category["Root Outputs"].append((str(rel_path), file.name, file.stat().st_size))
+    
+    # Generate HTML
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Term Dates - Generated Outputs</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+            color: #333;
+        }}
+        h1 {{
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }}
+        h2 {{
+            color: #34495e;
+            margin-top: 30px;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 8px;
+        }}
+        h3 {{
+            color: #555;
+            margin-top: 20px;
+        }}
+        .readme {{
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+            overflow-x: auto;
+        }}
+        .readme h1 {{
+            margin-top: 0;
+            font-size: 1.8em;
+        }}
+        .readme h2 {{
+            margin-top: 1.5em;
+            font-size: 1.4em;
+        }}
+        .readme h3 {{
+            margin-top: 1.2em;
+            font-size: 1.2em;
+        }}
+        .readme pre {{
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }}
+        .readme code {{
+            background: #e8f4f8;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }}
+        .readme pre code {{
+            background: transparent;
+            padding: 0;
+        }}
+        .readme ul, .readme ol {{
+            padding-left: 30px;
+        }}
+        .readme li {{
+            margin: 5px 0;
+        }}
+        .readme a {{
+            color: #3498db;
+            text-decoration: underline;
+        }}
+        .file-list {{
+            list-style: none;
+            padding: 0;
+        }}
+        .file-list li {{
+            padding: 10px;
+            margin: 5px 0;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .file-list li:hover {{
+            background: #f0f7ff;
+            border-color: #3498db;
+        }}
+        .file-list a {{
+            color: #3498db;
+            text-decoration: none;
+            font-weight: 500;
+            flex-grow: 1;
+        }}
+        .file-list a:hover {{
+            text-decoration: underline;
+        }}
+        .file-size {{
+            color: #888;
+            font-size: 0.9em;
+            margin-left: 10px;
+        }}
+        .category {{
+            margin: 30px 0;
+        }}
+        .timestamp {{
+            color: #888;
+            font-size: 0.9em;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+        }}
+        code {{
+            background: #e8f4f8;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }}
+    </style>
+</head>
+<body>
+    <h1>📅 Term Dates - Generated Outputs</h1>
+    
+    <div class="readme">
+{readme_html}
+    </div>
+    
+    <h2>Generated Files</h2>
+"""
+    
+    # Add file listings by category
+    for category, files in files_by_category.items():
+        if files:
+            html += f"""
+    <div class="category">
+        <h3>{category}</h3>
+        <ul class="file-list">
+"""
+            for rel_path, filename, size in files:
+                size_kb = size / 1024
+                size_str = f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb/1024:.1f} MB"
+                html += f"""            <li>
+                <a href="{rel_path}">{rel_path}</a>
+                <span class="file-size">{size_str}</span>
+            </li>
+"""
+            html += """        </ul>
+    </div>
+"""
+    
+    # Add timestamp
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    html += f"""
+    <div class="timestamp">
+        Generated: {now}
+    </div>
+</body>
+</html>
+"""
+    
+    # Write index.html
+    index_path = output_dir / "index.html"
+    index_path.write_text(html, encoding="utf-8")
 
 
 def main() -> None:
@@ -833,6 +1216,12 @@ def main() -> None:
                 label="Term day",
                 include_pd=False,
             )
+            write_school_holidays_ics(
+                lea_dir / "school_holidays.ics",
+                valid_years,
+                lea_name,
+                [],
+            )
 
         schools_config = config.get("schools", [])
         if isinstance(schools_config, list) and schools_config:
@@ -879,11 +1268,21 @@ def main() -> None:
                     label="School day",
                     include_pd=False,
                 )
+                write_school_holidays_ics(
+                    school_dir / "school_holidays.ics",
+                    valid_years,
+                    name,
+                    pd_days,
+                )
 
             if invalid_by_school:
                 print("Warning: date totals invalid for schools:")
                 for detail in invalid_by_school:
                     print(f"- {detail}")
+
+        # Build index.html
+        readme_path = Path(__file__).parent / "README.md"
+        build_index_html(output_dir, readme_path)
 
         print(f"Wrote outputs to {output_dir}")
         return
@@ -940,6 +1339,16 @@ def main() -> None:
         label="School day",
         include_pd=False,
     )
+    write_school_holidays_ics(
+        output_dir / "school_holidays.ics",
+        valid_years,
+        school_name,
+        pd_days,
+    )
+
+    # Build index.html
+    readme_path = Path(__file__).parent / "README.md"
+    build_index_html(output_dir, readme_path)
 
     if pd_days and len(pd_days) != 5:
         print(f"Warning: expected 5 PD days, got {len(pd_days)}")

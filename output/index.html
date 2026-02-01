@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Term Dates - Generated Outputs</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #34495e;
+            margin-top: 30px;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 8px;
+        }
+        h3 {
+            color: #555;
+            margin-top: 20px;
+        }
+        .readme {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+            overflow-x: auto;
+        }
+        .readme h1 {
+            margin-top: 0;
+            font-size: 1.8em;
+        }
+        .readme h2 {
+            margin-top: 1.5em;
+            font-size: 1.4em;
+        }
+        .readme h3 {
+            margin-top: 1.2em;
+            font-size: 1.2em;
+        }
+        .readme pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        .readme code {
+            background: #e8f4f8;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        .readme pre code {
+            background: transparent;
+            padding: 0;
+        }
+        .readme ul, .readme ol {
+            padding-left: 30px;
+        }
+        .readme li {
+            margin: 5px 0;
+        }
+        .readme a {
+            color: #3498db;
+            text-decoration: underline;
+        }
+        .file-list {
+            list-style: none;
+            padding: 0;
+        }
+        .file-list li {
+            padding: 10px;
+            margin: 5px 0;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .file-list li:hover {
+            background: #f0f7ff;
+            border-color: #3498db;
+        }
+        .file-list a {
+            color: #3498db;
+            text-decoration: none;
+            font-weight: 500;
+            flex-grow: 1;
+        }
+        .file-list a:hover {
+            text-decoration: underline;
+        }
+        .file-size {
+            color: #888;
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
+        .category {
+            margin: 30px 0;
+        }
+        .timestamp {
+            color: #888;
+            font-size: 0.9em;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+        }
+        code {
+            background: #e8f4f8;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>📅 Term Dates - Generated Outputs</h1>
+    
+    <div class="readme">
+<h1>term_dates</h1>
+<p>Builds JSON and iCal outputs for Sheffield term dates, with optional school-specific PD days, bank holiday removal, and academic week numbering.</p>
+<p>Source data: https://www.sheffield.gov.uk/schools-childcare/school-information-term-dates</p>
+<h2>Usage</h2>
+<p>Generate outputs from the Sheffield term dates URL (default) or a local text file.<br />
+If the web page content is unreliable, use --scan-pdfs to parse linked PDF calendars (requires pdfminer.six).</p>
+<h2>YAML config (multiple schools)</h2>
+<p>Use config.yaml to run multiple LEAs and schools in one pass:</p>
+<pre><code class="language-yaml">scan_pdfs: true
+debug: false
+bank_holidays_source: https://www.gov.uk/bank-holidays.json
+output_dir: output
+leas:
+    - name: Sheffield
+        source_url: https://www.sheffield.gov.uk/schools-childcare/school-information-term-dates
+        scan_pdfs: true
+schools:
+    - name: The Sheffield UTC Academy Trust
+        lea: Sheffield
+        dir: sutc
+        pd_days:
+            - date: 2025-09-01
+                label: INSET day
+            - date: 2025-10-22
+                label: INSET day
+</code></pre>
+    </div>
+    
+    <h2>Generated Files</h2>
+
+    <div class="category">
+        <h3>LEA Outputs</h3>
+        <ul class="file-list">
+            <li>
+                <a href="leas/sheffield/school_holidays.ics">leas/sheffield/school_holidays.ics</a>
+                <span class="file-size">4.4 KB</span>
+            </li>
+            <li>
+                <a href="leas/sheffield/term_dates.ics">leas/sheffield/term_dates.ics</a>
+                <span class="file-size">136.5 KB</span>
+            </li>
+            <li>
+                <a href="leas/sheffield/term_dates.json">leas/sheffield/term_dates.json</a>
+                <span class="file-size">56.1 KB</span>
+            </li>
+        </ul>
+    </div>
+
+    <div class="category">
+        <h3>School Outputs</h3>
+        <ul class="file-list">
+            <li>
+                <a href="schools/sutc/school_dates.ics">schools/sutc/school_dates.ics</a>
+                <span class="file-size">148.8 KB</span>
+            </li>
+            <li>
+                <a href="schools/sutc/school_dates.json">schools/sutc/school_dates.json</a>
+                <span class="file-size">56.0 KB</span>
+            </li>
+            <li>
+                <a href="schools/sutc/school_holidays.ics">schools/sutc/school_holidays.ics</a>
+                <span class="file-size">6.9 KB</span>
+            </li>
+        </ul>
+    </div>
+
+    <div class="timestamp">
+        Generated: 2026-02-01 18:12:12 UTC
+    </div>
+</body>
+</html>
