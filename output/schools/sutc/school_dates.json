@@ -1,8 +1,89 @@
 {
-  "generated_at": "2026-02-01T17:03:21.920098+00:00",
+  "generated_at": "2026-02-01T17:03:21.931038+00:00",
   "source": "https://www.sheffield.gov.uk/schools-childcare/school-information-term-dates",
-  "school": "Sheffield",
-  "pd_days": [],
+  "school": "The Sheffield UTC Academy Trust",
+  "pd_days": [
+    {
+      "date": "2025-09-01",
+      "label": "INSET day"
+    },
+    {
+      "date": "2025-10-22",
+      "label": "INSET day"
+    },
+    {
+      "date": "2025-10-23",
+      "label": "Disaggregated Day"
+    },
+    {
+      "date": "2025-10-24",
+      "label": "Disaggregated Day"
+    },
+    {
+      "date": "2026-07-20",
+      "label": "Disaggregated Day"
+    },
+    {
+      "date": "2026-09-01",
+      "label": "INSET day"
+    },
+    {
+      "date": "2026-09-02",
+      "label": "INSET day"
+    },
+    {
+      "date": "2026-10-21",
+      "label": "INSET day"
+    },
+    {
+      "date": "2026-10-22",
+      "label": "Disaggregated Day"
+    },
+    {
+      "date": "2026-10-23",
+      "label": "Disaggregated Day"
+    },
+    {
+      "date": "2025-09-01",
+      "label": "INSET day"
+    },
+    {
+      "date": "2025-10-22",
+      "label": "INSET day"
+    },
+    {
+      "date": "2025-10-23",
+      "label": "Disaggregated Day"
+    },
+    {
+      "date": "2025-10-24",
+      "label": "Disaggregated Day"
+    },
+    {
+      "date": "2026-07-20",
+      "label": "Disaggregated Day"
+    },
+    {
+      "date": "2026-09-01",
+      "label": "INSET day"
+    },
+    {
+      "date": "2026-09-02",
+      "label": "INSET day"
+    },
+    {
+      "date": "2026-10-21",
+      "label": "INSET day"
+    },
+    {
+      "date": "2026-10-22",
+      "label": "Disaggregated Day"
+    },
+    {
+      "date": "2026-10-23",
+      "label": "Disaggregated Day"
+    }
+  ],
   "academic_years": [
     {
       "name": "2027-28",
@@ -815,10 +896,6 @@
       ],
       "dates": [
         {
-          "date": "2025-09-01",
-          "week": 1
-        },
-        {
           "date": "2025-09-02",
           "week": 1
         },
@@ -960,18 +1037,6 @@
         },
         {
           "date": "2025-10-21",
-          "week": 8
-        },
-        {
-          "date": "2025-10-22",
-          "week": 8
-        },
-        {
-          "date": "2025-10-23",
-          "week": 8
-        },
-        {
-          "date": "2025-10-24",
           "week": 8
         },
         {
@@ -1589,10 +1654,6 @@
         {
           "date": "2026-07-17",
           "week": 39
-        },
-        {
-          "date": "2026-07-20",
-          "week": 40
         }
       ]
     },
@@ -1610,14 +1671,6 @@
         "2027-05-31"
       ],
       "dates": [
-        {
-          "date": "2026-09-01",
-          "week": 1
-        },
-        {
-          "date": "2026-09-02",
-          "week": 1
-        },
         {
           "date": "2026-09-03",
           "week": 1
@@ -1752,18 +1805,6 @@
         },
         {
           "date": "2026-10-20",
-          "week": 8
-        },
-        {
-          "date": "2026-10-21",
-          "week": 8
-        },
-        {
-          "date": "2026-10-22",
-          "week": 8
-        },
-        {
-          "date": "2026-10-23",
           "week": 8
         },
         {

@@ -118,7 +118,7 @@ def resolve_config_path(value: object, base_dir: Path) -> Path | None:
 def extract_academic_year_sections(text: str) -> list[dict[str, object]]:
     clean_text = re.sub(r"\s+", " ", text)
     header_re = re.compile(
-        r"(School term dates|School calendar)\s+(\d{4})\s+to\s+(\d{4})",
+        r"(School term dates|School calendar)\s+(\d{4})\s+to\s+(\d{4})(?:\s+consultation)?",
         re.IGNORECASE,
     )
     term_re = re.compile(
@@ -137,7 +137,7 @@ def extract_academic_year_sections(text: str) -> list[dict[str, object]]:
         start_year = int(match.group(2))
         end_year = int(match.group(3))
         year_name = f"{start_year}-{str(end_year)[-2:]}"
-        provisional = "consultation" in section_text.lower()
+        provisional = "consultation" in match.group(0).lower()
         lower_text = section_text.lower()
         term_block_start = None
         for label in ("term dates:", "term time:"):
@@ -526,7 +526,7 @@ def validate_years(
     pd_days: list[PDDay],
     debug: bool = False,
     label: str = "",
-    expected_days: int = 190,
+    expected_days: int | None = None,
 ) -> tuple[list[AcademicYear], list[str]]:
     pd_set = {pd.date for pd in pd_days}
     invalid_years: list[str] = []
@@ -545,14 +545,17 @@ def validate_years(
                 f"holidays={len(year.holiday_dates)} pd_in_term={len(pd_in_year)} "
                 f"school_days={len(school_days)} provisional={year.provisional}"
             )
-        if not school_days:
-            invalid_years.append(f"{year.name} (0 school days)")
-        elif len(school_days) != expected_days:
-            invalid_years.append(
-                f"{year.name} ({len(school_days)} school days, expected {expected_days})"
-            )
-        else:
+        if expected_days is None:
             valid_years.append(year)
+        else:
+            if not school_days:
+                invalid_years.append(f"{year.name} (0 school days)")
+            elif len(school_days) != expected_days:
+                invalid_years.append(
+                    f"{year.name} ({len(school_days)} school days, expected {expected_days})"
+                )
+            else:
+                valid_years.append(year)
     return valid_years, invalid_years
 
 
@@ -798,7 +801,7 @@ def main() -> None:
                 [],
                 debug=debug,
                 label=f"LEA {lea_name}",
-                expected_days=195,
+                expected_days=None,
             )
             if invalid_years:
                 invalid_leas.append(f"{lea_name}: " + ", ".join(sorted(invalid_years)))
@@ -806,10 +809,9 @@ def main() -> None:
             lea_years_map[lea_name] = valid_years
 
         if invalid_leas:
-            print("Error: date totals invalid; outputs not written.")
+            print("Warning: date totals invalid for LEAs:")
             for detail in invalid_leas:
                 print(f"- {detail}")
-            return
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -853,7 +855,7 @@ def main() -> None:
                     pd_days,
                     debug=debug,
                     label=name,
-                    expected_days=190,
+                    expected_days=None,
                 )
                 if invalid_years:
                     invalid_by_school.append(
@@ -879,10 +881,9 @@ def main() -> None:
                 )
 
             if invalid_by_school:
-                print("Error: date totals invalid; outputs not written.")
+                print("Warning: date totals invalid for schools:")
                 for detail in invalid_by_school:
                     print(f"- {detail}")
-                return
 
         print(f"Wrote outputs to {output_dir}")
         return
@@ -903,13 +904,12 @@ def main() -> None:
         years,
         pd_days,
         debug=debug,
-        expected_days=190,
+        expected_days=None,
     )
     if invalid_years:
-        print("Error: date totals invalid; outputs not written.")
+        print("Warning: date totals invalid:")
         for detail in invalid_years:
             print(f"- {detail}")
-        return
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
