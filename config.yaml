@@ -1,0 +1,33 @@
+scan_pdfs: true
+debug: true
+bank_holidays_source: https://www.gov.uk/bank-holidays.json
+output_dir: output
+leas:
+  - name: Sheffield
+    source_url: https://www.sheffield.gov.uk/schools-childcare/school-information-term-dates
+    scan_pdfs: true
+schools:
+  - name: The Sheffield UTC Academy Trust
+    dir: sutc
+    lea: Sheffield
+    pd_days:
+      - date: 2025-09-01
+        label: INSET day
+      - date: 2025-10-22
+        label: INSET day
+      - date: 2025-10-23
+        label: Disaggregated Day
+      - date: 2025-10-24
+        label: Disaggregated Day
+      - date: 2026-07-20
+        label: Disaggregated Day
+      - date: 2026-09-01
+        label: INSET day
+      - date: 2026-09-02
+        label: INSET day
+      - date: 2026-10-21
+        label: INSET day
+      - date: 2026-10-22
+        label: Disaggregated Day
+      - date: 2026-10-23
+        label: Disaggregated Day
