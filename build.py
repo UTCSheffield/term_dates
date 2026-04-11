@@ -519,6 +519,69 @@ def week_numbers(dates: Iterable[date]) -> dict[date, int]:
     return date_week
 
 
+def iter_week_mondays(start: date, end: date) -> Iterable[date]:
+    current = start - timedelta(days=start.weekday())
+    end_monday = end - timedelta(days=end.weekday())
+    while current <= end_monday:
+        yield current
+        current += timedelta(days=7)
+
+
+def week_csv_filename(year_name: str) -> str:
+    try:
+        start_text, end_text = year_name.split("-", 1)
+        start_year = int(start_text)
+        if len(end_text) == 2:
+            end_two_digits = int(end_text)
+        else:
+            end_two_digits = int(end_text[-2:])
+        return f"weeks_{start_year % 100:02d}_{end_two_digits:02d}.csv"
+    except Exception:
+        safe_name = re.sub(r"[^0-9]+", "_", year_name).strip("_") or "unknown"
+        return f"weeks_{safe_name}.csv"
+
+
+def build_week_csv_rows(year: AcademicYear) -> list[tuple[str, str]]:
+    if not year.term_ranges:
+        return []
+
+    week_map = week_numbers(year.term_dates)
+    week_number_by_monday: dict[date, int] = {}
+    for current_date, week_number in week_map.items():
+        monday = current_date - timedelta(days=current_date.weekday())
+        week_number_by_monday[monday] = week_number
+
+    first_term_start = min(start for start, _ in year.term_ranges)
+    last_term_end = max(end for _, end in year.term_ranges)
+
+    rows: list[tuple[str, str]] = []
+    last_regular_week: int | None = None
+    decimal_index = 0
+
+    for monday in iter_week_mondays(first_term_start, last_term_end):
+        regular_week = week_number_by_monday.get(monday)
+        if regular_week is not None:
+            week_label = str(regular_week)
+            last_regular_week = regular_week
+            decimal_index = 0
+        else:
+            if last_regular_week is None:
+                continue
+            decimal_index += 1
+            week_label = f"{last_regular_week}.{decimal_index}"
+        rows.append((week_label, monday.strftime("%d/%m/%Y")))
+
+    return rows
+
+
+def write_week_csv(path: Path, year: AcademicYear) -> None:
+    rows = build_week_csv_rows(year)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["Week", "Date"])
+        writer.writerows(rows)
+
+
 def parse_pd_days(pd_days: str | None, pd_file: Path | None) -> list[PDDay]:
     values: dict[date, str] = {}
     if pd_days:
@@ -1521,6 +1584,9 @@ def main() -> None:
                         shortname=school_shortname,
                     )
 
+                for year in valid_years:
+                    write_week_csv(school_dir / week_csv_filename(year.name), year)
+
             if invalid_by_school:
                 print("Warning: date totals invalid for schools:")
                 for detail in invalid_by_school:
@@ -1615,6 +1681,9 @@ def main() -> None:
             bank_holidays=bank_holidays,
             shortname=None,
         )
+
+    for year in valid_years:
+        write_week_csv(output_dir / week_csv_filename(year.name), year)
 
     # Build index.html
     readme_path = Path(__file__).parent / "README.md"
