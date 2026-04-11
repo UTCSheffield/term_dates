@@ -5,6 +5,7 @@ import json
 import re
 import io
 import urllib.request
+from copy import copy
 from html.parser import HTMLParser
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -27,6 +28,14 @@ try:
     HAS_MARKDOWN = True
 except ImportError:
     HAS_MARKDOWN = False
+
+try:
+    from openpyxl import load_workbook  # type: ignore[import-not-found]
+    from openpyxl.worksheet.table import Table, TableStyleInfo  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - optional dependency
+    load_workbook = None
+    Table = None
+    TableStyleInfo = None
 
 
 def is_term_line(line: str) -> bool:
@@ -93,6 +102,16 @@ class AcademicYear:
 class PDDay:
     date: date
     label: str
+
+
+@dataclass(frozen=True)
+class SOWEntry:
+    kind: str
+    monday: date
+    half_term: int | None = None
+    week_number: int | None = None
+    note: str | None = None
+    label: str | None = None
 
 
 def slugify(value: str) -> str:
@@ -580,6 +599,285 @@ def write_week_csv(path: Path, year: AcademicYear) -> None:
         writer = csv.writer(handle)
         writer.writerow(["Week", "Date"])
         writer.writerows(rows)
+
+
+def school_dates_for_year(year: AcademicYear, pd_days: list[PDDay]) -> list[date]:
+    pd_set = {pd.date for pd in pd_days}
+    holiday_set = set(year.holiday_dates)
+    return [d for d in year.term_dates if d not in pd_set and d not in holiday_set]
+
+
+def weekday_range_text(days: list[int]) -> str:
+    names = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+    ranges: list[str] = []
+    start = days[0]
+    end = days[0]
+    for current in days[1:]:
+        if current == end + 1:
+            end = current
+            continue
+        ranges.append(names[start] if start == end else f"{names[start]}-{names[end]}")
+        start = current
+        end = current
+    ranges.append(names[start] if start == end else f"{names[start]}-{names[end]}")
+    return ", ".join(ranges)
+
+
+def closure_note(
+    monday: date,
+    school_date_set: set[date],
+    closure_reasons: dict[date, str],
+) -> str | None:
+    weekdays = [monday + timedelta(days=offset) for offset in range(5)]
+    unavailable = [day for day in weekdays if day not in school_date_set]
+    if not unavailable or len(unavailable) == 5:
+        return None
+
+    note = f"No {weekday_range_text([day.weekday() for day in unavailable])}"
+    if all(day in closure_reasons for day in unavailable):
+        reason_codes = sorted({closure_reasons[day] for day in unavailable})
+        note = f"{note} ({'/'.join(reason_codes)})"
+    return note
+
+
+def map_sow_break_label(label: str, monday: date) -> str:
+    lower = label.lower()
+    if "christmas" in lower:
+        return "Christmas Term Break"
+    if "easter" in lower or "spring" in lower:
+        return "Easter Term Break"
+    if "summer" in lower:
+        return "Summer Term Break"
+    if "half" in lower or monday.month in {2, 5, 10}:
+        return "Half Term Break"
+    return "Holiday"
+
+
+def half_term_for_week(monday: date, year: AcademicYear, school_date_set: set[date]) -> int | None:
+    week_school_dates = [
+        monday + timedelta(days=offset)
+        for offset in range(5)
+        if monday + timedelta(days=offset) in school_date_set
+    ]
+    if not week_school_dates:
+        return None
+    first_school_date = min(week_school_dates)
+    for index, (start, end) in enumerate(sorted(year.term_ranges, key=lambda item: item[0]), start=1):
+        if start <= first_school_date <= end:
+            return index
+    return None
+
+
+def holiday_label_for_week(monday: date, holiday_periods: list[tuple[date, date, str]]) -> str:
+    week_end = monday + timedelta(days=6)
+    for start, end, label in holiday_periods:
+        if start <= week_end and monday <= end:
+            return map_sow_break_label(label, monday)
+    return "Holiday"
+
+
+def build_sow_entries(year: AcademicYear, pd_days: list[PDDay]) -> list[SOWEntry]:
+    school_dates = school_dates_for_year(year, pd_days)
+    if not school_dates:
+        return []
+
+    school_date_set = set(school_dates)
+    teaching_mondays = sorted({day - timedelta(days=day.weekday()) for day in school_dates})
+
+    closure_reasons: dict[date, str] = {}
+    term_date_set = set(year.term_dates)
+    for holiday in year.holiday_dates:
+        if holiday in term_date_set:
+            closure_reasons[holiday] = "BH"
+    for pd in pd_days:
+        if pd.date in term_date_set:
+            closure_reasons[pd.date] = "PD"
+
+    try:
+        start_year = int(year.name.split("-")[0])
+        academic_start = date(start_year, 8, 1)
+        academic_end = date(start_year + 1, 7, 31)
+    except ValueError:
+        academic_start = min(start for start, _ in year.term_ranges)
+        academic_end = max(end for _, end in year.term_ranges)
+
+    holiday_periods = calculate_school_holidays(year.term_ranges, academic_start, academic_end)
+
+    entries: list[SOWEntry] = []
+    previous_monday: date | None = None
+    for week_number, monday in enumerate(teaching_mondays, start=1):
+        if previous_monday is not None:
+            gap_monday = previous_monday + timedelta(days=7)
+            while gap_monday < monday:
+                entries.append(
+                    SOWEntry(
+                        kind="break",
+                        monday=gap_monday,
+                        label=holiday_label_for_week(gap_monday, holiday_periods),
+                    )
+                )
+                gap_monday += timedelta(days=7)
+
+        entries.append(
+            SOWEntry(
+                kind="teaching",
+                monday=monday,
+                half_term=half_term_for_week(monday, year, school_date_set),
+                week_number=week_number,
+                note=closure_note(monday, school_date_set, closure_reasons),
+            )
+        )
+        previous_monday = monday
+
+    if previous_monday is not None:
+        final_break_monday = previous_monday + timedelta(days=7)
+        entries.append(
+            SOWEntry(
+                kind="break",
+                monday=final_break_monday,
+                label="Summer Term Break",
+            )
+        )
+
+    return entries
+
+
+def copy_template_row(source_ws, target_ws, template_row: int, target_row: int, max_column: int) -> None:
+    target_ws.row_dimensions[target_row].height = source_ws.row_dimensions[template_row].height
+    for column in range(1, max_column + 1):
+        source = source_ws.cell(template_row, column)
+        target = target_ws.cell(target_row, column)
+        if source.has_style:
+            target._style = copy(source._style)
+
+
+def sow_filename(year_name: str) -> str:
+    safe_year = year_name.replace("-", "_")
+    return f"sow_blank_{safe_year}.xlsx"
+
+
+def teaching_template_row(lesson_index: int, lessons_per_week: int) -> int:
+    if lessons_per_week == 1:
+        return 4
+    if lesson_index == 0:
+        return 3
+    if lesson_index == lessons_per_week - 1:
+        return 4
+    return 18
+
+
+def break_template_rows(length: int) -> list[int]:
+    if length <= 1:
+        return [19]
+    if length == 2:
+        return [34, 35]
+    rows = [34]
+    rows.extend([19] * (length - 2))
+    rows.append(35)
+    return rows
+
+
+def set_sow_date(cell, value: date) -> None:
+    cell.value = value
+    cell.number_format = "dd/mm/yyyy"
+
+
+def clear_row_values(ws, row: int, max_column: int) -> None:
+    for column in range(1, max_column + 1):
+        ws.cell(row, column).value = None
+
+
+def populate_sow_sheet(source_ws, worksheet, year: AcademicYear, pd_days: list[PDDay], lessons_per_week: int) -> None:
+    worksheet.title = f"{lessons_per_week} Per Week"
+    worksheet["G1"] = f"{year.name} - Course"
+
+    max_column = worksheet.max_column
+    if worksheet.max_row >= 3:
+        worksheet.delete_rows(3, worksheet.max_row - 2)
+
+    entries = build_sow_entries(year, pd_days)
+    current_row = 3
+    index = 0
+
+    while index < len(entries):
+        entry = entries[index]
+        if entry.kind == "teaching":
+            for lesson_index in range(lessons_per_week):
+                template_row = teaching_template_row(lesson_index, lessons_per_week)
+                copy_template_row(source_ws, worksheet, template_row, current_row, max_column)
+                clear_row_values(worksheet, current_row, max_column)
+                worksheet.cell(current_row, 1).value = entry.half_term
+                worksheet.cell(current_row, 2).value = entry.week_number
+                set_sow_date(worksheet.cell(current_row, 3), entry.monday)
+                worksheet.cell(current_row, 4).value = entry.note if lesson_index == 0 else None
+                current_row += 1
+            index += 1
+            continue
+
+        block_start = index
+        while index < len(entries) and entries[index].kind == "break":
+            index += 1
+        block = entries[block_start:index]
+        template_rows = break_template_rows(len(block))
+
+        for block_entry, template_row in zip(block, template_rows):
+            copy_template_row(source_ws, worksheet, template_row, current_row, max_column)
+            clear_row_values(worksheet, current_row, max_column)
+            set_sow_date(worksheet.cell(current_row, 3), block_entry.monday)
+            worksheet.cell(current_row, 7).value = block_entry.label
+            current_row += 1
+
+    return current_row - 1
+
+
+def write_sow_workbook(
+    template_path: Path,
+    output_path: Path,
+    year: AcademicYear,
+    pd_days: list[PDDay],
+) -> None:
+    if load_workbook is None:
+        raise RuntimeError("openpyxl is not installed")
+
+    workbook = load_workbook(template_path)
+    # Keep the original unmodified sheet as the style source inside the same workbook
+    # so _style indices always reference the same style table.
+    style_source = workbook[workbook.sheetnames[0]]
+    style_source.title = "_src"
+    output_sheets = [workbook.copy_worksheet(style_source) for _ in range(6)]
+    for lessons_per_week, worksheet in enumerate(output_sheets, start=1):
+        last_row = populate_sow_sheet(style_source, worksheet, year, pd_days, lessons_per_week)
+        if Table is not None and last_row >= 3:
+            tab = Table(displayName=f"SOWTable{lessons_per_week}", ref=f"A2:J{last_row}")
+            tab.tableStyleInfo = TableStyleInfo(
+                name="TableStyleLight20",
+                showFirstColumn=False,
+                showLastColumn=False,
+                showRowStripes=True,
+                showColumnStripes=False,
+            )
+            worksheet.add_table(tab)
+    workbook.remove(style_source)
+    workbook.save(output_path)
+
+
+def write_sow_workbooks(
+    output_dir: Path,
+    template_path: Path,
+    years: list[AcademicYear],
+    pd_days: list[PDDay],
+) -> None:
+    if not template_path.exists():
+        return
+    for stale_file in output_dir.glob("sow_blank_*.xlsx"):
+        stale_file.unlink()
+    for year in years:
+        write_sow_workbook(
+            template_path,
+            output_dir / sow_filename(year.name),
+            year,
+            pd_days,
+        )
 
 
 def parse_pd_days(pd_days: str | None, pd_file: Path | None) -> list[PDDay]:
@@ -1429,6 +1727,7 @@ def main() -> None:
         config.get("skip_bank_holidays", False)
     )
     debug = args.debug or bool(config.get("debug", False))
+    sow_template_path = Path(__file__).with_name("SOW Blank.xlsx")
 
     bank_holidays: set[date] = set()
     if not skip_bank_holidays:
@@ -1586,6 +1885,8 @@ def main() -> None:
 
                 for year in valid_years:
                     write_week_csv(school_dir / week_csv_filename(year.name), year)
+                if sow_template_path.exists():
+                    write_sow_workbooks(school_dir, sow_template_path, valid_years, pd_days)
 
             if invalid_by_school:
                 print("Warning: date totals invalid for schools:")
@@ -1684,6 +1985,8 @@ def main() -> None:
 
     for year in valid_years:
         write_week_csv(output_dir / week_csv_filename(year.name), year)
+    if sow_template_path.exists():
+        write_sow_workbooks(output_dir, sow_template_path, valid_years, pd_days)
 
     # Build index.html
     readme_path = Path(__file__).parent / "README.md"
