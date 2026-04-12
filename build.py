@@ -114,6 +114,13 @@ class SOWEntry:
     label: str | None = None
 
 
+@dataclass(frozen=True)
+class WeekExportRow:
+    week: str
+    monday: date
+    notes: str | None = None
+
+
 def slugify(value: str) -> str:
     value = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
     return value or "school"
@@ -546,21 +553,50 @@ def iter_week_mondays(start: date, end: date) -> Iterable[date]:
         current += timedelta(days=7)
 
 
-def week_csv_filename(year_name: str) -> str:
-    try:
-        start_text, end_text = year_name.split("-", 1)
-        start_year = int(start_text)
-        if len(end_text) == 2:
-            end_two_digits = int(end_text)
-        else:
-            end_two_digits = int(end_text[-2:])
-        return f"weeks_{start_year % 100:02d}_{end_two_digits:02d}.csv"
-    except Exception:
-        safe_name = re.sub(r"[^0-9]+", "_", year_name).strip("_") or "unknown"
-        return f"weeks_{safe_name}.csv"
+def week_sheet_title(year_name: str) -> str:
+    return year_name.replace("-", "_")[:31] or "Year"
 
 
-def build_week_csv_rows(year: AcademicYear) -> list[tuple[str, str]]:
+def week_workbook_filename() -> str:
+    return "weeks.xlsx"
+
+
+def describe_closure_days(monday: date, closure_reasons: dict[date, str]) -> str | None:
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+    details: list[str] = []
+    for offset in range(5):
+        current_day = monday + timedelta(days=offset)
+        reason = closure_reasons.get(current_day)
+        if reason is not None:
+            details.append(f"{day_names[offset]}: {reason}")
+    if not details:
+        return None
+    return "; ".join(details)
+
+
+def week_break_note(
+    monday: date,
+    holiday_periods: list[tuple[date, date, str]],
+    closure_reasons: dict[date, str],
+) -> str:
+    labels: list[str] = []
+    week_end = monday + timedelta(days=4)
+    for start, end, label in holiday_periods:
+        mapped_label = map_sow_break_label(label, monday)
+        if start <= week_end and monday <= end and mapped_label not in labels:
+            labels.append(mapped_label)
+
+    closure_detail = describe_closure_days(monday, closure_reasons)
+    if labels and closure_detail:
+        return f"{' / '.join(labels)}; {closure_detail}"
+    if labels:
+        return " / ".join(labels)
+    if closure_detail:
+        return closure_detail
+    return "Closed"
+
+
+def build_week_export_rows(year: AcademicYear, pd_days: list[PDDay]) -> list[WeekExportRow]:
     if not year.term_ranges:
         return []
 
@@ -573,7 +609,30 @@ def build_week_csv_rows(year: AcademicYear) -> list[tuple[str, str]]:
     first_term_start = min(start for start, _ in year.term_ranges)
     last_term_end = max(end for _, end in year.term_ranges)
 
-    rows: list[tuple[str, str]] = []
+    school_dates = school_dates_for_year(year, pd_days)
+    school_date_set = set(school_dates)
+    term_date_set = set(year.term_dates)
+
+    closure_reasons: dict[date, str] = {}
+    holiday_dates = set(year.holiday_dates)
+    for holiday in holiday_dates:
+        if holiday in term_date_set:
+            closure_reasons[holiday] = "Bank holiday"
+    for pd in pd_days:
+        if pd.date in term_date_set:
+            closure_reasons[pd.date] = pd.label
+
+    try:
+        start_year = int(year.name.split("-")[0])
+        academic_start = date(start_year, 8, 1)
+        academic_end = date(start_year + 1, 7, 31)
+    except ValueError:
+        academic_start = first_term_start
+        academic_end = last_term_end
+
+    holiday_periods = calculate_school_holidays(year.term_ranges, academic_start, academic_end)
+
+    rows: list[WeekExportRow] = []
     last_regular_week: int | None = None
     decimal_index = 0
 
@@ -583,22 +642,71 @@ def build_week_csv_rows(year: AcademicYear) -> list[tuple[str, str]]:
             week_label = str(regular_week)
             last_regular_week = regular_week
             decimal_index = 0
+            notes = closure_note(monday, school_date_set, closure_reasons)
         else:
             if last_regular_week is None:
                 continue
             decimal_index += 1
             week_label = f"{last_regular_week}.{decimal_index}"
-        rows.append((week_label, monday.strftime("%d/%m/%Y")))
+            notes = week_break_note(monday, holiday_periods, closure_reasons)
+        rows.append(WeekExportRow(week=week_label, monday=monday, notes=notes))
 
     return rows
 
 
-def write_week_csv(path: Path, year: AcademicYear) -> None:
-    rows = build_week_csv_rows(year)
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(["Week", "Date"])
-        writer.writerows(rows)
+def write_week_workbook(path: Path, years: list[AcademicYear], pd_days: list[PDDay]) -> None:
+    if load_workbook is None:
+        raise RuntimeError("openpyxl is not installed")
+
+    from openpyxl import Workbook  # type: ignore[import-not-found]
+
+    workbook = Workbook()
+    default_sheet = workbook.active
+    workbook.remove(default_sheet)
+
+    for year in years:
+        worksheet = workbook.create_sheet(title=week_sheet_title(year.name))
+        worksheet.append(["Week", "Date", "Notes"])
+
+        for row in build_week_export_rows(year, pd_days):
+            worksheet.append(
+                [
+                    row.week,
+                    row.monday,
+                    row.notes,
+                ]
+            )
+
+        for cell in worksheet["B"][1:]:
+            cell.number_format = "dd/mm/yyyy"
+
+        worksheet.column_dimensions["A"].width = 10
+        worksheet.column_dimensions["B"].width = 14
+        worksheet.column_dimensions["C"].width = 42
+
+        if Table is not None and worksheet.max_row >= 2:
+            table_name = re.sub(r"[^A-Za-z0-9]", "", f"Weeks_{year.name}") or "Weeks"
+            table = Table(displayName=table_name[:255], ref=f"A1:C{worksheet.max_row}")
+            table.tableStyleInfo = TableStyleInfo(
+                name="TableStyleLight20",
+                showFirstColumn=False,
+                showLastColumn=False,
+                showRowStripes=True,
+                showColumnStripes=False,
+            )
+            worksheet.add_table(table)
+
+    workbook.save(path)
+
+
+def write_week_workbooks(output_dir: Path, years: list[AcademicYear], pd_days: list[PDDay]) -> None:
+    for stale_file in output_dir.glob("weeks_*.csv"):
+        stale_file.unlink()
+    workbook_path = output_dir / week_workbook_filename()
+    if years:
+        write_week_workbook(workbook_path, years, pd_days)
+    elif workbook_path.exists():
+        workbook_path.unlink()
 
 
 def school_dates_for_year(year: AcademicYear, pd_days: list[PDDay]) -> list[date]:
@@ -1883,8 +1991,7 @@ def main() -> None:
                         shortname=school_shortname,
                     )
 
-                for year in valid_years:
-                    write_week_csv(school_dir / week_csv_filename(year.name), year)
+                write_week_workbooks(school_dir, valid_years, pd_days)
                 if sow_template_path.exists():
                     write_sow_workbooks(school_dir, sow_template_path, valid_years, pd_days)
 
@@ -1983,8 +2090,7 @@ def main() -> None:
             shortname=None,
         )
 
-    for year in valid_years:
-        write_week_csv(output_dir / week_csv_filename(year.name), year)
+    write_week_workbooks(output_dir, valid_years, pd_days)
     if sow_template_path.exists():
         write_sow_workbooks(output_dir, sow_template_path, valid_years, pd_days)
 

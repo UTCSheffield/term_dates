@@ -2,6 +2,8 @@
 
 Builds JSON and iCal outputs for Sheffield term dates, with optional school-specific PD days, bank holiday removal, and academic week numbering.
 
+Week exports are generated as a single Excel workbook per output folder, with one worksheet per academic year and a notes column describing closures and holiday periods.
+
 Source data: https://www.sheffield.gov.uk/schools-childcare/school-information-term-dates
 
 ## Usage
