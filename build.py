@@ -364,12 +364,19 @@ def extract_pdf_links(html: str, base_url: str) -> list[str]:
     return links
 
 
+HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/pdf,application/json;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-GB,en;q=0.9",
+}
+
+
 def read_source_text(source: str, scan_pdfs: bool = True) -> str:
     if source.startswith("http://") or source.startswith("https://"):
-        request = urllib.request.Request(
-            source,
-            headers={"User-Agent": "datepatterns/1.0"},
-        )
+        request = urllib.request.Request(source, headers=HTTP_HEADERS)
         with urllib.request.urlopen(request, timeout=20) as response:
             content = response.read().decode("utf-8", errors="ignore")
         text = extract_text_from_html(content)
@@ -389,20 +396,14 @@ def read_source_text(source: str, scan_pdfs: bool = True) -> str:
 def fetch_pdf_text(pdf_url: str) -> str:
     if pdf_extract_text is None:
         raise RuntimeError("pdfminer.six not installed")
-    request = urllib.request.Request(
-        pdf_url,
-        headers={"User-Agent": "datepatterns/1.0"},
-    )
+    request = urllib.request.Request(pdf_url, headers=HTTP_HEADERS)
     with urllib.request.urlopen(request, timeout=30) as response:
         data = response.read()
     return pdf_extract_text(io.BytesIO(data))
 
 
 def fetch_bank_holidays(source: str) -> set[date]:
-    request = urllib.request.Request(
-        source,
-        headers={"User-Agent": "datepatterns/1.0"},
-    )
+    request = urllib.request.Request(source, headers=HTTP_HEADERS)
     with urllib.request.urlopen(request, timeout=20) as response:
         payload = json.loads(response.read().decode("utf-8", errors="ignore"))
     events = payload.get("england-and-wales", {}).get("events", [])
