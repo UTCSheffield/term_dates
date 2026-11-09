@@ -136,8 +136,54 @@
 <p>Week exports are generated as a single Excel workbook per output folder, with one worksheet per academic year and a notes column describing closures and holiday periods.</p>
 <p>Source data: https://www.sheffield.gov.uk/schools-childcare/school-information-term-dates</p>
 <h2>Usage</h2>
-<p>Generate outputs from the Sheffield term dates URL (default) or a local text file.<br />
-If the web page content is unreliable, use --scan-pdfs to parse linked PDF calendars (requires pdfminer.six).</p>
+<p>Install the dependencies and run the build from the repository directory:</p>
+<pre><code class="language-sh">python -m pip install -r requirements.txt
+python build.py
+</code></pre>
+<p>The build reads <code>config.yaml</code> by default. Update a school's <code>pd_days</code> there when<br />
+INSET or other training days change, then rebuild. These days are excluded from<br />
+school days but are recorded separately from school holiday periods.</p>
+<p>Check the debug counts, warnings and generated JSON and calendars against the<br />
+source before using them. The build does not verify that all term ranges were<br />
+found: a missing term can be reported as a long holiday and omit school days.<br />
+Holiday start and end dates in JSON are inclusive.</p>
+<h2>Using a local source</h2>
+<p>The council website may return a security challenge or otherwise be unavailable<br />
+to the build. If the page is accessible but incomplete, PDF scanning is enabled<br />
+by <code>scan_pdfs</code> in the supplied configuration. It cannot help if the page itself<br />
+is blocked. Alternatively, obtain the dates from a trusted source and prepare a<br />
+plain text file containing every term range for each academic year needed.</p>
+<p>For example, the following format describes six term ranges. Verify the dates<br />
+against the current source before relying on them:</p>
+<pre><code class="language-text">School term dates 2026 to 2027
+Term dates:
+1 September 2026 until 23 October 2026
+2 November 2026 until 18 December 2026
+4 January 2027 until 12 February 2027
+22 February 2027 until 25 March 2027
+12 April 2027 until 28 May 2027
+7 June 2027 until 21 July 2027
+</code></pre>
+<p>Use full month names and include the year on both dates. Ranges are inclusive;<br />
+enter term dates, not holiday dates. School-specific INSET days belong in<br />
+<code>pd_days</code>, not in the term ranges.</p>
+<p>Save the text as, for example, <code>term_dates.txt</code> in the repository directory.<br />
+In <code>config.yaml</code>, change the relevant LEA's <code>source_url</code> to <code>term_dates.txt</code>.<br />
+Relative source paths are resolved from the directory in which the build runs.<br />
+With an LEA-specific <code>source_url</code>, <code>--source</code> does not override that value.</p>
+<p>First build into a fresh directory to check the results without changing the<br />
+existing outputs:</p>
+<pre><code class="language-sh">python build.py --output-dir /tmp/term-dates-check
+</code></pre>
+<p>Use a new empty directory for each check. Inspect the LEA and school JSON and<br />
+calendar files there, including school days and holiday boundaries. Existing<br />
+confirmed years can be retained during a normal build, so changing the source<br />
+does not guarantee existing years are refreshed. Do not rely on a rebuild alone<br />
+to repair previously generated data. A fresh build only contains years present<br />
+in its source; replacing existing outputs with it can discard historical years.<br />
+Keep the existing outputs until all required years have been verified and a<br />
+preservation strategy is in place. Restore the council URL when it becomes<br />
+accessible again.</p>
 <h2>YAML config (multiple schools)</h2>
 <p>Use config.yaml to run multiple LEAs and schools in one pass:</p>
 <pre><code class="language-yaml">scan_pdfs: true
@@ -145,19 +191,19 @@ debug: false
 bank_holidays_source: https://www.gov.uk/bank-holidays.json
 output_dir: output
 leas:
-    - name: Sheffield
-        source_url: https://www.sheffield.gov.uk/schools-childcare/school-information-term-dates
-        scan_pdfs: true
+  - name: Sheffield
+    source_url: https://www.sheffield.gov.uk/schools-childcare/school-information-term-dates
+    scan_pdfs: true
 schools:
-    - name: The Sheffield UTC Academy Trust
-        shortname: SUTC
-        lea: Sheffield
-        dir: sutc
-        pd_days:
-            - date: 2025-09-01
-                label: INSET day
-            - date: 2025-10-22
-                label: INSET day
+  - name: The Sheffield UTC Academy Trust
+    shortname: SUTC
+    lea: Sheffield
+    dir: sutc
+    pd_days:
+      - date: 2025-09-01
+        label: INSET day
+      - date: 2025-10-22
+        label: INSET day
 </code></pre>
     </div>
     
@@ -186,35 +232,23 @@ schools:
         <ul class="file-list">
             <li>
                 <a href="webcal://utcsheffield.github.io/term_dates/schools/sutc/school_dates.ics">schools/sutc/school_dates.ics (Subscribe)</a>
-                <span class="file-size">79.0 KB</span>
+                <span class="file-size">42.8 KB</span>
             </li>
             <li>
                 <a href="schools/sutc/school_dates.json">schools/sutc/school_dates.json</a>
-                <span class="file-size">43.6 KB</span>
+                <span class="file-size">41.5 KB</span>
             </li>
             <li>
                 <a href="webcal://utcsheffield.github.io/term_dates/schools/sutc/school_holidays.ics">schools/sutc/school_holidays.ics (Subscribe)</a>
-                <span class="file-size">10.5 KB</span>
-            </li>
-            <li>
-                <a href="schools/sutc/sow_blank_2023_24.xlsx">schools/sutc/sow_blank_2023_24.xlsx</a>
-                <span class="file-size">20.0 KB</span>
-            </li>
-            <li>
-                <a href="schools/sutc/sow_blank_2025_26.xlsx">schools/sutc/sow_blank_2025_26.xlsx</a>
-                <span class="file-size">31.8 KB</span>
+                <span class="file-size">3.8 KB</span>
             </li>
             <li>
                 <a href="schools/sutc/sow_blank_2026_27.xlsx">schools/sutc/sow_blank_2026_27.xlsx</a>
-                <span class="file-size">30.4 KB</span>
-            </li>
-            <li>
-                <a href="schools/sutc/sow_blank_2027_28.xlsx">schools/sutc/sow_blank_2027_28.xlsx</a>
-                <span class="file-size">31.9 KB</span>
+                <span class="file-size">37.2 KB</span>
             </li>
             <li>
                 <a href="schools/sutc/weeks.xlsx">schools/sutc/weeks.xlsx</a>
-                <span class="file-size">11.8 KB</span>
+                <span class="file-size">6.4 KB</span>
             </li>
         </ul>
     </div>

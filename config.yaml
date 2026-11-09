@@ -4,8 +4,8 @@ bank_holidays_source: https://www.gov.uk/bank-holidays.json
 output_dir: output
 leas:
   - name: Sheffield
-    source_url: https://www.sheffield.gov.uk/schools-childcare/school-information-term-dates
-    scan_pdfs: true
+    source_url: term_dates.txt #https://www.sheffield.gov.uk/schools-childcare/school-information-term-dates
+    #scan_pdfs: true
 schools:
   - name: The Sheffield UTC Academy Trust
     shortname: SUTC
@@ -24,11 +24,11 @@ schools:
         label: Disaggregated Day
       - date: 2026-09-01
         label: INSET day
-      - date: 2026-09-02
-        label: INSET day
       - date: 2026-10-21
         label: INSET day
       - date: 2026-10-22
         label: Disaggregated Day
       - date: 2026-10-23
         label: Disaggregated Day
+      - date: 2027-01-04
+        label: INSET day
